@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <ctype.h>
+#include <errno.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <termio.h>
@@ -12,11 +13,12 @@ void die(const char *s) {
 }
 
 void disableRowMode() {
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);  // disable row mode so text is visible in terminal
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios) == -1)  // disable row mode so text is visible in terminal
+        die("tcsetattr");
 }
 
 void enableRawMode() {
-    tcgetattr(STDIN_FILENO, &orig_termios);     // get terminal attributes
+    if (tcgetattr(STDIN_FILENO, &orig_termios) == -1) die("tcgetattr");     // get terminal attributes
     atexit(disableRowMode);
 
     struct termios raw = orig_termios;
@@ -28,7 +30,7 @@ void enableRawMode() {
     raw.c_cc[VTIME] = 1;       // max time to wait before return - 1*(100ms)
 
 
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);       // set new attr
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) die("tcsetattr");       // set new attr
 }
 
 int main() {
@@ -36,7 +38,7 @@ int main() {
 
     while (1) {
         char c = '\0';
-        read(STDIN_FILENO, &c, 1);
+        if (read(STDIN_FILENO, &c, 1) == -1 && errno != EAGAIN) die("read");
         
         if (iscntrl(c)) {
             printf("%d\r\n", c);     // print ASCII of control char
