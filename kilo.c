@@ -6,15 +6,19 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <stdlib.h>
+#include <string.h>
 #include <termio.h>
 
 /*** defines ***/
 
 #define CTRL_KEY(k) ((k) & 0x1f)
+#define KILO_VERSION "0.0.1"
 
 /*** data ***/
 
-struct editorConfig{
+struct editorConfig
+{
+    int cx, cy;
     int screenrows;
     int screencols;
     struct termios orig_termios;
@@ -24,127 +28,270 @@ struct editorConfig E;
 
 /*** terminal ***/
 
-void die(const char *s) {
+void die(const char *s)
+{
     write(STDOUT_FILENO, "\x1b[2J", 4);
     write(STDOUT_FILENO, "\x1b[H", 3);
 
-    perror(s);      // prints error description
-    exit(1);    // exit with exit status 1 
+    perror(s); // prints error description
+    exit(1);   // exit with exit status 1
 }
 
-void disableRowMode() {
-    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios) == -1)  // disable row mode so text is visible in terminal
+void disableRowMode()
+{
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios) == -1) // disable row mode so text is visible in terminal
         die("tcsetattr");
 }
 
-void enableRawMode() {
-    if (tcgetattr(STDIN_FILENO, &E.orig_termios) == -1) die("tcgetattr");     // get terminal attributes
+void enableRawMode()
+{
+    if (tcgetattr(STDIN_FILENO, &E.orig_termios) == -1)
+        die("tcgetattr"); // get terminal attributes
     atexit(disableRowMode);
 
     struct termios raw = E.orig_termios;
-    raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);    // disable break condition, input carriage return(ctrl+M), parity check, 8th bit strip, flow control (ctrl+S, ctrl+Q)
-    raw.c_lflag &= ~(OPOST);     // disable output processing to prevent "\n" from becoming "\r\n"
-    raw.c_cflag |= (CS8);       // bitmask, sets char size to 8 bits per byte
-    raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);    // disable echo, cannon mode, control-V, ctrl-c (SIGINT) and ctrl-z (SIGSTP) using Bitwise AND and NOT
-    raw.c_cc[VMIN] = 0;     // min bytes needed before returning
-    raw.c_cc[VTIME] = 1;       // max time to wait before return - 1*(100ms)
+    raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON); // disable break condition, input carriage return(ctrl+M), parity check, 8th bit strip, flow control (ctrl+S, ctrl+Q)
+    raw.c_lflag &= ~(OPOST);                                  // disable output processing to prevent "\n" from becoming "\r\n"
+    raw.c_cflag |= (CS8);                                     // bitmask, sets char size to 8 bits per byte
+    raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);          // disable echo, cannon mode, control-V, ctrl-c (SIGINT) and ctrl-z (SIGSTP) using Bitwise AND and NOT
+    raw.c_cc[VMIN] = 0;                                       // min bytes needed before returning
+    raw.c_cc[VTIME] = 1;                                      // max time to wait before return - 1*(100ms)
 
-    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) die("tcsetattr");       // set new attr
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1)
+        die("tcsetattr"); // set new attr
 }
 
-char editorReadKey() {
+char editorReadKey()
+{
     int nread;
     char c;
-    while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {
-        if  (nread == -1 && errno != EAGAIN) die("read");      // EAGAIN flag for cygwin
+    while ((nread = read(STDIN_FILENO, &c, 1)) != 1)
+    {
+        if (nread == -1 && errno != EAGAIN)
+            die("read"); // EAGAIN flag for cygwin
+    }
+
+    if (c == '\x1b')
+    {
+        char seq[3];
+
+        if (read(STDIN_FILENO, &seq[0], 1) != 1)
+            return '\x1b';
+        if (read(STDIN_FILENO, &seq[1], 1) != 1)
+            return '\x1b';
+
+        if (seq[0] == '[')
+        {
+            switch (seq[1])
+            {
+            case 'A':
+                return 'w';
+            case 'B':
+                return 's';
+            case 'C':
+                return 'd';
+            case 'D':
+                return 'a';
+            }
+        }
+        else
+        {
+            return '\x1b';
+        }
     }
 
     return c;
 }
 
-int getCursorPosition(int *rows, int *cols) {
-    char buf[32];      // read response into buffer
+int getCursorPosition(int *rows, int *cols)
+{
+    char buf[32]; // read response into buffer
     unsigned int i = 0;
 
-    if (write(STDOUT_FILENO, "\x1b[6n", 4) != 4) return -1;     // cursor position report ESCAPE Seq
-    
-    while (i < sizeof(buf) - 1) {
-        if (read(STDIN_FILENO, &buf[i], 1) != 1) break;
-        if (buf[i] == 'R') break;      // read till "R"
-            i++;
+    if (write(STDOUT_FILENO, "\x1b[6n", 4) != 4)
+        return -1; // cursor position report ESCAPE Seq
+
+    while (i < sizeof(buf) - 1)
+    {
+        if (read(STDIN_FILENO, &buf[i], 1) != 1)
+            break;
+        if (buf[i] == 'R')
+            break; // read till "R"
+        i++;
     }
-    
-    buf[i] = '\0';    // strings end with \0
-    if (buf[0] != '\x1b' || buf[1] != '[') return -1;
-    if (sscanf(&buf[2], "%d;%d", rows, cols) != 2) return -1;   // get row and column info
+
+    buf[i] = '\0'; // strings end with \0
+    if (buf[0] != '\x1b' || buf[1] != '[')
+        return -1;
+    if (sscanf(&buf[2], "%d;%d", rows, cols) != 2)
+        return -1; // get row and column info
 
     return 0;
 }
 
-int getWindowSize(int *rows, int *cols){
+int getWindowSize(int *rows, int *cols)
+{
     struct winsize ws;
 
-    if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {     // window size from ioctl.h
-        if (write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12)       // move cursor to the opposing edge of the terminal
+    if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0)
+    {                                                             // window size from ioctl.h
+        if (write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12) // move cursor to the opposing edge of the terminal
             return -1;
 
         return getCursorPosition(rows, cols);
-    } 
-    else {
+    }
+    else
+    {
         *cols = ws.ws_col;
         *rows = ws.ws_row;
         return 0;
     }
 }
 
+/*** append buffer - to implement dynamic strings for a single write call ***/
+
+struct abuf
+{
+    char *b;
+    int len;
+};
+
+#define ABUF_INIT \
+    {             \
+        NULL, 0   \
+    }
+
+void abAppend(struct abuf *ab, const char *s, int len)
+{
+    char *new = realloc(ab->b, ab->len + len); // alloc memory of len(currStr) + len(nextStr)
+
+    if (new == NULL)
+        return;
+    memcpy(&new[ab->len], s, len); // copy s after end of data in buffer
+    ab->b = new;
+    ab->len += len;
+}
+
+void abFree(struct abuf *ab)
+{
+    free(ab->b); // free memory
+}
+
 /*** output ***/
 
-void editorDrawRows() {
+void editorDrawRows(struct abuf *ab)
+{
     int y;
-    for (y = 0; y < E.screenrows; y++) {
-        write(STDERR_FILENO, "~", 1);
-        if (y < E.screenrows - 1) write(STDOUT_FILENO, "\r\n", 2);  
+    for (y = 0; y < E.screenrows; y++)
+    {
+        if (y == E.screenrows / 3)
+        {
+            char welcome[80];
+            int welcomelen = snprintf(welcome, sizeof(welcome),
+                                      "Kilo editor -- version %s", KILO_VERSION);
+            if (welcomelen > E.screencols)
+                welcomelen = E.screencols;                 // truncate in case small terminal
+            int padding = (E.screencols - welcomelen) / 2; // centre welcome str
+            if (padding)
+            {
+                abAppend(ab, "~", 1);
+                padding--;
+            }
+            while (padding--)
+                abAppend(ab, " ", 1);
+            abAppend(ab, welcome, welcomelen);
+        }
+        else
+        {
+            abAppend(ab, "~", 1);
+        }
+
+        abAppend(ab, "\x1b[K", 3); // erases part of the current line
+        if (y < E.screenrows - 1)
+            abAppend(ab, "\r\n", 2);
     }
 }
 
-void editorRefreshScreen() {
-    write(STDOUT_FILENO, "\x1b[2J", 4);
-    write(STDOUT_FILENO, "\x1b[H", 3);
+void editorRefreshScreen()
+{
+    struct abuf ab = ABUF_INIT;
 
-    editorDrawRows();
-    write(STDOUT_FILENO, "\x1b[H", 3);
+    abAppend(&ab, "\x1b[?25l", 6); // reset mode
+    abAppend(&ab, "\x1b[H", 3);
+
+    editorDrawRows(&ab);
+
+    char buf[32];
+    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.cy + 1, E.cx + 1);
+    abAppend(&ab, buf, strlen(buf));
+
+    abAppend(&ab, "\x1b[?25h", 6); // set mode
+
+    write(STDOUT_FILENO, ab.b, ab.len);
+    abFree(&ab);
 }
 
 /*** input ***/
 
-void editorProcessKeypress() {
+void editorMoveCursor(char key)
+{
+    switch (key)
+    {
+    case 'a':
+        E.cx--;
+        break;
+    case 'd':
+        E.cx++;
+        break;
+    case 'w':
+        E.cy--;
+        break;
+    case 's':
+        E.cy++;
+        break;
+    }
+}
+void editorProcessKeypress()
+{
     char c = editorReadKey();
+
     switch (c)
     {
-    case CTRL('q'):
+    case CTRL_KEY('q'):
         write(STDOUT_FILENO, "\x1b[2J", 4);
         write(STDOUT_FILENO, "\x1b[H", 3);
         exit(0);
         break;
-    
-    default:
+
+    case 'w':
+    case 's':
+    case 'a':
+    case 'd':
+        editorMoveCursor(c);
         break;
     }
 }
 
 /*** init ***/
 
-void initEditor() {
-    if (getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize");
+void initEditor()
+{
+    E.cx = 0;
+    E.cy = 0;
+
+    if (getWindowSize(&E.screenrows, &E.screencols) == -1)
+        die("getWindowSize");
 }
 
-int main() {
+int main()
+{
     enableRawMode();
     initEditor();
 
-    while (1) {
-        write(STDOUT_FILENO, "\x1b[2J", 4);     // escape seq to clear screen
-        write(STDOUT_FILENO, "\x1b[H", 3);      // escape seq to reset cursor
+    while (1)
+    {
+        write(STDOUT_FILENO, "\x1b[2J", 4); // escape seq to clear screen
+        write(STDOUT_FILENO, "\x1b[H", 3);  // escape seq to reset cursor
         editorRefreshScreen();
         editorProcessKeypress();
     }
