@@ -72,7 +72,7 @@ struct editorConfig E;
 
 void editorSetStatusMessage(const char *fmt, ...);
 void editorRefreshScreen();
-char *editorPrompt(char *prompt);
+char *editorPrompt(char *prompt, void (*callback)(char *, int));
 
 /*** terminal ***/
 
@@ -473,7 +473,7 @@ void editorSave()
 {
     if (E.filename == NULL)
     {
-        E.filename = editorPrompt("Save as: %s (ESC to cancel)");
+        E.filename = editorPrompt("Save as: %s (ESC to cancel)", NULL);
         if (E.filename == NULL)
         {
             editorSetStatusMessage("Save aborted");
@@ -507,27 +507,65 @@ void editorSave()
 
 /*** find ***/
 
-void editorFind()
+void editorFindCallback(char *query, int key)
 {
-    char *query = editorPrompt("Search: %s (ESC to cancel)");
-    if (query == NULL)
+    static int last_match = -1;
+    static int direction = 1;
+
+    if (key == '\r' || key == '\x1b')
+    {
+        last_match = -1;
+        direction = 1;
         return;
+    }    
+    else if (key == ARROW_DOWN || key ==ARROW_RIGHT) direction = 1;
+    else if (key == ARROW_UP || key == ARROW_LEFT) direction = -1;
+    else {
+        last_match = -1;
+        direction = 1;
+    }
+
+    if (last_match == -1) direction = 1;
+    int current = last_match;
 
     int j;
     for (j = 0; j < E.numrows; j++)
     {
-        erow *row = &E.row[j];
+        current += direction;
+        if (current == -1) current = E.numrows -1;
+        else if (current == E.numrows) current = 0; // wrap around while search
+
+        erow *row = &E.row[current];
         char *match = strstr(row->render, query);
         if (match)
         {
-            E.cy = j;
+            last_match = current;   // idx of row we are searching
+            E.cy = current;
             E.cx = editorRxToCx(row, match - row->render); // move to start of word
             E.rowoff = E.numrows;                          // scroll to bottom so refresh makes the search result on top
             break;
         }
     }
+}
 
-    free(query);
+void editorFind()
+{
+    int saved_cx = E.cx;
+    int saved_cy = E.cy;
+    int saved_coloff = E.coloff;
+    int saved_rowoff = E.rowoff;
+
+    char *query = editorPrompt("Search: %s (Use ESC/Arrows/Enter)", editorFindCallback);
+
+    if (query)
+        free(query);
+    else
+    {
+        E.cx = saved_cx;
+        E.cy = saved_cy;
+        E.coloff = saved_coloff;
+        E.rowoff = saved_rowoff;
+    }
 }
 
 /*** append buffer - to implement dynamic strings for a single write call ***/
@@ -697,18 +735,16 @@ void editorSetStatusMessage(const char *fmt, ...)
 
 /*** input ***/
 
-char *editorPrompt(char *prompt)
+char *editorPrompt(char *prompt, void (*callback)(char *, int))
 {
     size_t bufsize = 128;
     char *buf = malloc(bufsize);
     size_t buflen = 0;
     buf[0] = '\0';
-
     while (1)
     {
         editorSetStatusMessage(prompt, buf);
         editorRefreshScreen();
-
         int c = editorReadKey();
         if (c == DEL_KEY || c == CTRL_KEY('h') || c == BACKSPACE)
         {
@@ -718,6 +754,8 @@ char *editorPrompt(char *prompt)
         else if (c == '\x1b')
         {
             editorSetStatusMessage("");
+            if (callback)
+                callback(buf, c);
             free(buf);
             return NULL;
         }
@@ -726,6 +764,8 @@ char *editorPrompt(char *prompt)
             if (buflen != 0)
             {
                 editorSetStatusMessage("");
+                if (callback)
+                    callback(buf, c);
                 return buf;
             }
         }
@@ -739,6 +779,8 @@ char *editorPrompt(char *prompt)
             buf[buflen++] = c;
             buf[buflen] = '\0';
         }
+        if (callback)
+            callback(buf, c);
     }
 }
 
