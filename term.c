@@ -19,9 +19,9 @@
 
 /*** defines ***/
 
-#define KILO_VERSION "0.0.1"
-#define KILO_TAB_STOP 8
-#define KILO_QUIT_TIMES 3
+#define TERM_VERSION "0.0.1"
+#define TERM_TAB_STOP 8
+#define TERM_QUIT_TIMES 3
 
 #define CTRL_KEY(k) ((k) & 0x1f)
 
@@ -246,7 +246,7 @@ int editorCxToRx(erow *row, int cx)
     for (j = 0; j < cx; j++)
     {
         if (row->chars[j] == '\t')
-            rx += (KILO_TAB_STOP - 1) - (rx % KILO_TAB_STOP);
+            rx += (TERM_TAB_STOP - 1) - (rx % TERM_TAB_STOP);
         rx++;
     }
     return rx;
@@ -261,7 +261,7 @@ void editorUpdateRow(erow *row)
             tabs++;
 
     free(row->render);
-    row->render = malloc(row->size + tabs * (KILO_TAB_STOP - 1) + 1);
+    row->render = malloc(row->size + tabs * (TERM_TAB_STOP - 1) + 1);
 
     int idx = 0;
     for (j = 0; j < row->size; j++)
@@ -269,7 +269,7 @@ void editorUpdateRow(erow *row)
         if (row->chars[j] == '\t')
         {
             row->render[idx++] = ' ';
-            while (idx % KILO_TAB_STOP != 0)
+            while (idx % TERM_TAB_STOP != 0)
                 row->render[idx++] = ' '; // render tabs
         }
         else
@@ -547,7 +547,7 @@ void editorDrawRows(struct abuf *ab)
             {
                 char welcome[80];
                 int welcomelen = snprintf(welcome, sizeof(welcome),
-                                          "Kilo editor -- version %s", KILO_VERSION);
+                                          "Term - a Terminal based editor -- version %s", TERM_VERSION);
                 if (welcomelen > E.screencols)
                     welcomelen = E.screencols;                 // truncate in case small terminal
                 int padding = (E.screencols - welcomelen) / 2; // centre welcome str
@@ -744,7 +744,7 @@ void editorMoveCursor(int key)
 
 void editorProcessKeypress()
 {
-    static int quit_times = KILO_QUIT_TIMES;
+    static int quit_times = TERM_QUIT_TIMES;
 
     int c = editorReadKey();
 
@@ -822,7 +822,7 @@ void editorProcessKeypress()
         break;
     }
 
-    quit_times = KILO_QUIT_TIMES;
+    quit_times = TERM_QUIT_TIMES;
 }
 
 /*** init ***/
