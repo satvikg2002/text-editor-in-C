@@ -371,7 +371,7 @@ void editorUpdateSyntax(erow *row)
                 if (kw2)
                     klen--;
                 if (!strncmp(&row->render[i], keywords[j], klen) &&
-                    is_separator(row->render[i + klen]))    // check for keyword and if sep comes after it
+                    is_separator(row->render[i + klen])) // check for keyword and if sep comes after it
                 {
                     memset(&row->hl[i], kw2 ? HL_KEYWORD2 : HL_KEYWORD1, klen);
                     i += klen;
@@ -890,7 +890,21 @@ void editorDrawRows(struct abuf *ab)
             int j;
             for (j = 0; j < len; j++)
             {
-                if (hl[j] == HL_NORMAL)
+                if (iscntrl(c[j]))
+                {
+                    char sym = (c[j] <= 26) ? '@' + c[j] : '?';
+                    abAppend(ab, "\x1b[7m", 4); // switch to inverted colors (escape/binary chars)
+                    abAppend(ab, &sym, 1);
+                    abAppend(ab, "\x1b[m", 3); // switch back
+
+                    if (current_color != -1)
+                    {
+                        char buf[16];
+                        int clen = snprintf(buf, sizeof(buf), "\x1b[%dm", current_color);
+                        abAppend(ab, buf, clen);
+                    }
+                }
+                else if (hl[j] == HL_NORMAL)
                 {
                     if (current_color != -1)
                     {
