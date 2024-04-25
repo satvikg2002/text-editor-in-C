@@ -39,6 +39,12 @@ enum editorKey
     PAGE_DOWN
 };
 
+enum editorHighlight
+{
+    HL_NORMAL = 0,
+    HL_NUMBER
+};
+
 /*** data ***/
 
 typedef struct erow
@@ -46,8 +52,9 @@ typedef struct erow
     int size;
     int rsize;
     char *chars;
-    char *render; // rendering tabs
-} erow;           // editor row
+    char *render;      // rendering tabs
+    unsigned char *hl; // syntax highlight
+} erow;                // editor row
 
 struct editorConfig
 {
@@ -237,6 +244,30 @@ int getWindowSize(int *rows, int *cols)
     }
 }
 
+/*** syntax highlighting ***/
+
+void editorUpdateSyntax(erow *row)
+{
+    row->hl = realloc(row->hl, row->rsize);
+    memset(row->hl, HL_NORMAL, row->rsize);
+
+    int i;
+    for (i = 0; i < row->rsize; i++)
+        if (isdigit(row->render[i]))
+            row->hl[i] = HL_NUMBER;
+}
+
+int editorSyntaxToColor(int hl)
+{
+    switch (hl)
+    {
+    case HL_NUMBER:
+        return 31;
+    default:
+        return 37;
+    }
+}
+
 /*** row operations ***/
 
 int editorCxToRx(erow *row, int cx)
@@ -296,6 +327,8 @@ void editorUpdateRow(erow *row)
     }
     row->render[idx] = '\0';
     row->rsize = idx;
+
+    editorUpdateSyntax(row);
 }
 
 void editorInsertRow(int at, char *s, size_t len)
@@ -313,6 +346,7 @@ void editorInsertRow(int at, char *s, size_t len)
 
     E.row[at].rsize = 0;
     E.row[at].render = NULL;
+    E.row[at].hl = NULL;
     editorUpdateRow(&E.row[at]);
 
     E.numrows++;
@@ -323,6 +357,7 @@ void editorFreeRow(erow *row)
 {
     free(row->render);
     free(row->chars);
+    free(row->hl);
 }
 
 void editorDelRow(int at)
@@ -517,29 +552,35 @@ void editorFindCallback(char *query, int key)
         last_match = -1;
         direction = 1;
         return;
-    }    
-    else if (key == ARROW_DOWN || key ==ARROW_RIGHT) direction = 1;
-    else if (key == ARROW_UP || key == ARROW_LEFT) direction = -1;
-    else {
+    }
+    else if (key == ARROW_DOWN || key == ARROW_RIGHT)
+        direction = 1;
+    else if (key == ARROW_UP || key == ARROW_LEFT)
+        direction = -1;
+    else
+    {
         last_match = -1;
         direction = 1;
     }
 
-    if (last_match == -1) direction = 1;
+    if (last_match == -1)
+        direction = 1;
     int current = last_match;
 
     int j;
     for (j = 0; j < E.numrows; j++)
     {
         current += direction;
-        if (current == -1) current = E.numrows -1;
-        else if (current == E.numrows) current = 0; // wrap around while search
+        if (current == -1)
+            current = E.numrows - 1;
+        else if (current == E.numrows)
+            current = 0; // wrap around while search
 
         erow *row = &E.row[current];
         char *match = strstr(row->render, query);
         if (match)
         {
-            last_match = current;   // idx of row we are searching
+            last_match = current; // idx of row we are searching
             E.cy = current;
             E.cx = editorRxToCx(row, match - row->render); // move to start of word
             E.rowoff = E.numrows;                          // scroll to bottom so refresh makes the search result on top
@@ -650,7 +691,20 @@ void editorDrawRows(struct abuf *ab)
                 len = 0;
             if (len > E.screencols)
                 len = E.screencols;
-            abAppend(ab, &E.row[filerow].render[E.coloff], len);
+
+            char *c = &E.row[filerow].render[E.coloff];
+            int j;
+            for (j = 0; j < len; j++)
+            {
+                if (isdigit(c[j])) // colored numbers
+                {
+                    abAppend(ab, "\x1b[31m", 5);
+                    abAppend(ab, &c[j], 1);
+                    abAppend(ab, "\x1b[39m", 5);
+                }
+                else
+                    abAppend(ab, &c[j], 1);
+            }
         }
 
         abAppend(ab, "\x1b[K", 3); // erases part of the current line
